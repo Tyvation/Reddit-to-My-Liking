@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Reddit Inline Pane",
+  "version": "0.8.5",
+  "description": "Open Reddit posts and comments in an embedded side pane without leaving the feed.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.reddit.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.reddit.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}
