@@ -12,7 +12,9 @@
   };
 
   const DEFAULTS = {
-    intercept: true
+    intercept: true,
+    fullWidthPercent: 100,
+    compactWidthPercent: 60
   };
 
   let settings = { ...DEFAULTS };
@@ -21,6 +23,7 @@
   let abortController = null;
   let avatarObserver = null;
   let panelRoot = null;
+  let resizeFrame = 0;
   const avatarCache = new Map();
 
   const postPathPattern = /^\/r\/[^/]+\/comments\/[a-z0-9]+(?:\/[^/?#]*)?/i;
@@ -251,61 +254,116 @@
     layout.style.setProperty('--rip-layout-left', `${leftRail}px`);
     const shift = leftRail - layoutLeft;
     if (Number.isFinite(viewportWidth)) {
-      const paneWidth = Math.max(0, viewportWidth - leftRail - mainWidth - 16);
-      const compactPaneWidth = Math.round(paneWidth * .6);
+      const availableWidth = Math.max(0, viewportWidth - leftRail - mainWidth - 16);
+      const fullPercent = Math.min(100, Math.max(50, Number(settings.fullWidthPercent) || 100));
+      const compactPercent = Math.min(fullPercent, Math.max(30, Number(settings.compactWidthPercent) || 60));
+      const paneWidth = Math.round(availableWidth * fullPercent / 100);
+      const compactPaneWidth = Math.round(availableWidth * compactPercent / 100);
+      layout.style.setProperty('--rip-pane-width', `${paneWidth}px`);
       layout.style.setProperty('--rip-compact-pane-width', `${compactPaneWidth}px`);
-      layout.style.setProperty('--rip-compact-layout-shift', `${shift + paneWidth - compactPaneWidth}px`);
+      layout.style.setProperty('--rip-compact-layout-shift', `${shift + availableWidth - compactPaneWidth}px`);
+      layout.style.setProperty('--rip-layout-shift', `${shift + availableWidth - paneWidth}px`);
+    } else {
+      layout.style.setProperty('--rip-layout-shift', `${shift}px`);
     }
-    layout.style.setProperty('--rip-layout-shift', `${shift}px`);
     return shift;
   }
 
-  function refreshPageLayout(sidebar) {
+  function primePageLayout(sidebar) {
     const layout = sidebar?.parentElement;
-    if (!layout?.classList.contains('rip-layout-open')) return;
+    const main = document.getElementById('main-content');
+    if (!layout || !main) return false;
+    layout.ripLayoutLeft = Math.ceil(layout.getBoundingClientRect().left);
+    layout.ripMainWidth = Math.ceil(main.getBoundingClientRect().width);
     setLayoutMetrics(layout, layout.ripLayoutLeft, layout.ripMainWidth, leftRailWidth());
+    return true;
   }
 
-  function stabilizePageLayout(sidebar) {
+  function resizePageLayout() {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => {
+      const sidebar = document.getElementById(IDS.sidebar);
+      const layout = sidebar?.parentElement;
+      if (!layout) return;
+      if (layout.classList.contains('rip-layout-open')) {
+        setLayoutMetrics(layout, layout.ripLayoutLeft, layout.ripMainWidth, leftRailWidth(), innerWidth);
+      } else {
+        primePageLayout(sidebar);
+      }
+    });
+  }
+
+  function layoutShift(layout, compact = layout.classList.contains('rip-layout-compact')) {
+    const property = compact ? '--rip-compact-layout-shift' : '--rip-layout-shift';
+    return Number.parseFloat(layout.style.getPropertyValue(property)) || 0;
+  }
+
+  function toggleCompact(root, button) {
+    const sidebar = root.parentElement;
     const layout = sidebar.parentElement;
-    cancelAnimationFrame(layout.ripStabilizeFrame || 0);
-    let remaining = 30;
-    const refresh = () => {
-      if (!sidebar.isConnected || !layout.classList.contains('rip-layout-open')) return;
-      refreshPageLayout(sidebar);
-      if (--remaining > 0) layout.ripStabilizeFrame = requestAnimationFrame(refresh);
-    };
-    layout.ripStabilizeFrame = requestAnimationFrame(refresh);
+    const main = document.getElementById('main-content');
+    layout.ripCompactAnimation?.cancel();
+    layout.ripMainAnimation?.cancel();
+    const current = layout.classList.contains('rip-layout-compact');
+    const active = !current;
+    const oldShift = layoutShift(layout, current);
+    const newShift = layoutShift(layout, active);
+    button.textContent = active ? 'Compact' : 'Full';
+    button.setAttribute('aria-pressed', String(active));
+    layout.classList.toggle('rip-layout-compact', active);
+    if (!main?.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
+    button.disabled = true;
+    const panelAnimation = root.animate([
+      { opacity: .72 },
+      { opacity: 1 }
+    ], { duration: 160, easing: 'ease-out' });
+    const mainAnimation = main.animate([
+      { translate: `${oldShift}px 0` },
+      { translate: `${newShift}px 0` }
+    ], { duration: 220, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    layout.ripCompactAnimation = panelAnimation;
+    layout.ripMainAnimation = mainAnimation;
+    mainAnimation.finished.then(() => {
+      if (layout.ripCompactAnimation !== panelAnimation) return;
+      layout.ripCompactAnimation = null;
+      layout.ripMainAnimation = null;
+      panelAnimation.cancel();
+      mainAnimation.cancel();
+      button.disabled = false;
+    }, () => {});
   }
 
   function expandPageLayout(sidebar) {
     const layout = sidebar.parentElement;
     const main = document.getElementById('main-content');
     if (!layout || !main) return;
-    layout.ripCloseAnimation?.cancel();
-    layout.ripCloseAnimation = null;
-    if (layout.classList.contains('rip-layout-open')) {
-      refreshPageLayout(sidebar);
-      return;
-    }
-
-    const layoutLeft = Math.ceil(layout.getBoundingClientRect().left);
-    const mainWidth = Math.ceil(main.getBoundingClientRect().width);
-    layout.ripLayoutLeft = layoutLeft;
-    layout.ripMainWidth = mainWidth;
-    const shift = setLayoutMetrics(layout, layoutLeft, mainWidth, leftRailWidth());
+    layout.ripMainAnimation?.cancel();
+    layout.ripMainAnimation = null;
+    layout.ripCompactAnimation?.cancel();
+    layout.ripCompactAnimation = null;
+    layout.ripPanelCloseAnimation?.cancel();
+    layout.ripPanelCloseAnimation = null;
+    if (layout.classList.contains('rip-layout-open')) return;
+    if (!Number.isFinite(layout.ripLayoutLeft) && !primePageLayout(sidebar)) return;
     layout.classList.add('rip-layout-open');
+    const shift = layoutShift(layout);
     document.documentElement.classList.add('rip-layout-active');
-    stabilizePageLayout(sidebar);
     if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      main.animate([{ transform: `translateX(${-shift}px)` }, { transform: 'translateX(0)' }], {
-        duration: 240,
-        easing: 'cubic-bezier(.2, .8, .2, 1)'
+      const animation = main.animate([{ translate: '0 0' }, { translate: `${shift}px 0` }], {
+        duration: 220,
+        easing: 'cubic-bezier(.4, 0, .2, 1)'
       });
+      layout.ripMainAnimation = animation;
+      animation.finished.then(() => {
+        if (layout.ripMainAnimation === animation) layout.ripMainAnimation = null;
+      }, () => {});
       document.getElementById(IDS.root)?.animate([
-        { opacity: 0, transform: 'translateX(16px)' },
-        { opacity: 1, transform: 'translateX(0)' }
-      ], { duration: 200, easing: 'ease-out' });
+        { transformOrigin: 'right center', transform: 'scaleX(0)' },
+        { transformOrigin: 'right center', transform: 'scaleX(1)' }
+      ], { duration: 220, easing: 'cubic-bezier(.4, 0, .2, 1)' });
     }
   }
 
@@ -334,7 +392,7 @@
             <strong id="${IDS.title}">Comments View</strong>
             <span id="${IDS.status}"></span>
           </div>
-          <button class="rip-compact-btn" data-action="compact" aria-pressed="false">Compact</button>
+          <button class="rip-compact-btn" data-action="compact" aria-pressed="false">Full</button>
           <a class="rip-icon-btn rip-open-native" href="#" target="_blank" rel="noopener" title="Open normally" aria-label="Open normally">↗</a>
           <button class="rip-icon-btn" data-action="close" title="Close" aria-label="Close">×</button>
         </header>
@@ -354,10 +412,7 @@
     root.addEventListener('click', event => {
       const compact = event.target.closest('[data-action="compact"]');
       if (compact) {
-        const layout = root.parentElement.parentElement;
-        const active = layout.classList.toggle('rip-layout-compact');
-        compact.textContent = active ? 'Full' : 'Compact';
-        compact.setAttribute('aria-pressed', String(active));
+        toggleCompact(root, compact);
         return;
       }
 
@@ -419,17 +474,15 @@
         comment.hidden = Boolean(query) && !comment.textContent.toLocaleLowerCase().includes(query);
       });
     });
-    root.classList.add('is-open');
-    expandPageLayout(sidebar);
-    sidebar.classList.add('rip-pane-open');
+    requestAnimationFrame(() => primePageLayout(sidebar));
   }
 
   function openPanel() {
     createPanel();
     const root = document.getElementById(IDS.root);
     if (!root) return;
-    expandPageLayout(root.parentElement);
     root.classList.add('is-open');
+    expandPageLayout(root.parentElement);
     root.parentElement.classList.add('rip-pane-open');
   }
 
@@ -438,25 +491,44 @@
     const sidebar = root?.parentElement;
     const layout = sidebar?.parentElement;
     const main = document.getElementById('main-content');
+    let panelAnimation = null;
     const finish = () => {
-      cancelAnimationFrame(layout?.ripStabilizeFrame || 0);
+      if (layout) {
+        layout.ripMainAnimation?.cancel();
+        layout.ripCompactAnimation?.cancel();
+        layout.ripMainAnimation = null;
+        layout.ripCompactAnimation = null;
+      }
       root?.classList.remove('is-open');
+      const compactButton = root?.querySelector('[data-action="compact"]');
+      if (compactButton) {
+        compactButton.disabled = false;
+        compactButton.textContent = 'Compact';
+        compactButton.setAttribute('aria-pressed', 'false');
+      }
+      panelAnimation?.cancel();
+      if (layout?.ripPanelCloseAnimation === panelAnimation) layout.ripPanelCloseAnimation = null;
       sidebar?.classList.remove('rip-pane-open');
-      layout?.classList.remove('rip-layout-open');
+      layout?.classList.remove('rip-layout-open', 'rip-layout-compact');
       document.documentElement.classList.remove('rip-layout-active');
     };
     if (layout && main?.animate && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      layout.ripCloseAnimation?.cancel();
-      root?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: 'ease-in' });
-      const shift = Number.parseFloat(layout.style.getPropertyValue('--rip-layout-shift')) || 0;
+      layout.ripMainAnimation?.cancel();
+      layout.ripCompactAnimation?.cancel();
+      panelAnimation = root?.animate([
+        { transformOrigin: 'right center', transform: 'scaleX(1)' },
+        { transformOrigin: 'right center', transform: 'scaleX(0)' }
+      ], { duration: 220, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+      layout.ripPanelCloseAnimation = panelAnimation;
+      const shift = layoutShift(layout);
       const animation = main.animate([
-        { transform: 'translateX(0)' },
-        { transform: `translateX(${-shift}px)` }
+        { translate: `${shift}px 0` },
+        { translate: '0 0' }
       ], { duration: 220, easing: 'cubic-bezier(.4, 0, .2, 1)' });
-      layout.ripCloseAnimation = animation;
+      layout.ripMainAnimation = animation;
       animation.finished.then(() => {
-        if (layout.ripCloseAnimation !== animation) return;
-        layout.ripCloseAnimation = null;
+        if (layout.ripMainAnimation !== animation) return;
+        layout.ripMainAnimation = null;
         finish();
       }, () => {});
     } else {
@@ -732,7 +804,8 @@
           style.id = 'rip-webview-style';
           style.textContent = `
             html, body { margin: 0 !important; min-width: 0 !important; background: var(--color-neutral-background, #0b1416) !important; overscroll-behavior: contain !important; }
-            #main-content { display: block !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 12px 32px !important; box-sizing: border-box !important; overscroll-behavior: contain !important; }
+            #main-content { display: block !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 12px 48px !important; box-sizing: border-box !important; overscroll-behavior: contain !important; }
+            #main-content #sticky-comment-composer-wrapper { position: static !important; inset: auto !important; }
           `;
           (doc.head || doc.documentElement).appendChild(style);
         }
@@ -1014,9 +1087,17 @@
 
   function init() {
     document.addEventListener('click', clickHandler, true);
+    addEventListener('resize', resizePageLayout, { passive: true });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      for (const key of ['fullWidthPercent', 'compactWidthPercent']) {
+        if (changes[key]) settings[key] = changes[key].newValue;
+      }
+      resizePageLayout();
+    });
     observePage();
     syncPage();
-    loadSettings();
+    loadSettings().then(resizePageLayout);
   }
 
   init();

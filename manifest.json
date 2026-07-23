@@ -1,8 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "Reddit Inline Pane",
-  "version": "0.8.5",
-  "description": "Open Reddit posts and comments in an embedded side pane without leaving the feed.",
+  "name": "Reddit to My Liking",
+  "version": "0.9.7",
+  "description": "Open Reddit posts and comments in an embedded side pane without leaving the feed. And enhanced image viewer.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "64": "icons/icon64.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Reader width settings",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
   "permissions": [
     "storage"
   ],

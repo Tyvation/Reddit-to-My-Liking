@@ -20,33 +20,32 @@
   right: 0 !important;
   bottom: 0 !important;
   left: auto !important;
-  width: calc(100vw - var(--rip-layout-left, 0px) - var(--rip-main-width, 720px) - var(--spacer-md, 16px)) !important;
+  width: var(--rip-pane-width, calc(100vw - var(--rip-layout-left, 0px) - var(--rip-main-width, 720px) - var(--spacer-md, 16px))) !important;
   height: auto !important;
   max-width: none !important;
   min-width: 0 !important;
   overflow: clip !important;
   z-index: 3;
-  transition: width 180ms cubic-bezier(.2, .8, .2, 1);
 }
 
 .rip-layout-open.rip-layout-compact > #right-sidebar-container.rip-pane-open {
   width: var(--rip-compact-pane-width, 420px) !important;
 }
 
-.rip-layout-open.rip-layout-compact {
-  left: var(--rip-compact-layout-shift, var(--rip-layout-shift, 0px)) !important;
+.rip-layout-open.rip-layout-compact > #main-content {
+  translate: var(--rip-compact-layout-shift, var(--rip-layout-shift, 0px)) 0;
 }
 
 .rip-layout-open > #main-content {
   width: var(--rip-main-width, 720px) !important;
   max-width: var(--rip-main-width, 720px) !important;
   min-width: var(--rip-main-width, 720px) !important;
+  translate: var(--rip-layout-shift, 0px) 0;
+  will-change: translate;
 }
 
 .rip-layout-open {
   position: relative !important;
-  left: var(--rip-layout-shift, 0px) !important;
-  transition: left 180ms cubic-bezier(.2, .8, .2, 1);
 }
 
 html.rip-layout-active { overflow-x: clip !important; }
@@ -59,8 +58,9 @@ html.rip-layout-active { overflow-x: clip !important; }
 #rip-toggle {
   width: 100%;
   min-height: 40px;
-  margin-bottom: 12px;
-  padding: 0 16px;
+  margin-top: 32px;
+  margin-bottom: 0px;
+  padding: 0 0px;
   border: 0;
   border-radius: 999px;
   color: var(--color-neutral-content-strong, inherit);
@@ -117,6 +117,7 @@ html.rip-layout-active { overflow-x: clip !important; }
   background: color-mix(in srgb, currentColor 17%, transparent);
 }
 .rip-compact-btn:active { transform: scale(.96); }
+.rip-compact-btn:disabled { cursor: wait; opacity: .72; }
 
 .rip-icon-btn {
   width: 34px;
