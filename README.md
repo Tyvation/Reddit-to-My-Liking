@@ -5,7 +5,7 @@
 A small extension for `chromium browsers` that opens Reddit posts and comment threads inside Reddit's right sidebar without navigating away from the feed.
 
 - How it looks like:
-![till](https://i.meee.com.tw/r9i7oCh.gif)
+![DEMO](demo.gif)
 
 ## Features
 
