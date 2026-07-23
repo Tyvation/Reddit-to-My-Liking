@@ -24,7 +24,7 @@ A small extension for `chromium browsers` that opens Reddit posts and comment th
 2. Open `Manage Extensions` in browser.
 3. Enable **Developer mode**.
 4. Select **Load unpacked**.
-5. Choose the extracted folder.
+5. Choose the `reddit-to-my-liking` folder.
 6. Reload Reddit.
 
 ## Notes and limitations
