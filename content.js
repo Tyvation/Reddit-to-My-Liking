@@ -745,13 +745,16 @@
   }
 
   function imageViewerItems(image, main) {
-    const carousel = image.closest('faceplate-carousel');
+    const gallery = image.closest('gallery-carousel, .gallery-carousel');
+    const carousel = gallery || image.closest('faceplate-carousel, .faceplate-carousel');
     const scope = carousel || image.closest('shreddit-post, shreddit-comment, article, [data-testid="post-container"]') || main;
+    const galleryImages = gallery?.querySelectorAll(':scope > ul > li .media-lightbox-img');
+    const candidates = galleryImages?.length ? galleryImages : [image, ...scope.querySelectorAll('img')];
     const items = [];
     const seen = new Set();
-    for (const candidate of [image, ...scope.querySelectorAll('img')]) {
+    for (const candidate of candidates) {
       if (candidate.closest('faceplate-avatar, [class*="avatar"], [data-testid*="avatar"]')) continue;
-      const candidateSrc = candidate.currentSrc || candidate.src;
+      const candidateSrc = candidate.currentSrc || candidate.src || candidate.dataset.lazySrc;
       if (!candidateSrc || seen.has(candidateSrc) || !/^(https?:|blob:|data:image\/)/i.test(candidateSrc)) continue;
       const pixels = Math.max(candidate.naturalWidth * candidate.naturalHeight, candidate.width * candidate.height);
       if (candidate !== image && !carousel && pixels < 4096) continue;
@@ -761,19 +764,43 @@
     return items;
   }
 
+  function imageViewerTarget(event, main) {
+    const path = event.composedPath();
+    if (!path.includes(main)) return null;
+    const gifPlayer = path.find(node => node?.matches?.('shreddit-player[gif]'));
+    if (gifPlayer) {
+      const video = gifPlayer.shadowRoot?.querySelector('video');
+      if (!video || video.paused || !path.includes(video)) return null;
+      const gifSrc = gifPlayer.getAttribute('src')
+        ?.match(/^https:\/\/(?:preview|i)\.redd\.it\/[^?]+\.gif/i)?.[0]
+        ?.replace('preview.redd.it', 'i.redd.it');
+      return gifSrc ? { src: gifSrc, alt: 'Reddit GIF', gallery: [] } : null;
+    }
+
+    const image = imageFromEvent(event, main);
+    if (image) {
+      const src = image.currentSrc || image.src;
+      if (src) return { src, alt: image.alt || '', gallery: imageViewerItems(image, main) };
+    }
+
+    const link = path.find(node => node?.tagName === 'A'
+      && /^https?:/i.test(node.href) && mediaType(node.href) === 'image');
+    return link
+      ? { src: link.href, alt: link.textContent.trim() || 'Reddit image', gallery: [] }
+      : null;
+  }
+
   function captureWebviewImages(frame, main) {
     const frameWindow = frame.contentWindow;
     const frameDocument = frame.contentDocument;
     if (!frameWindow || !frameDocument || frame.ripImageCaptureDocument === frameDocument) return;
     frame.ripImageCaptureDocument = frameDocument;
     frameWindow.addEventListener('click', event => {
-      const image = imageFromEvent(event, main);
-      if (!image) return;
-      const src = image.currentSrc || image.src;
-      if (!src) return;
+      const viewer = imageViewerTarget(event, main);
+      if (!viewer) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      openImageViewer(src, image.alt || '', imageViewerItems(image, main));
+      openImageViewer(viewer.src, viewer.alt, viewer.gallery);
     }, true);
   }
 
@@ -1037,16 +1064,13 @@
   }
 
   function clickHandler(event) {
-    const main = document.getElementById('main-content');
-    const image = main && imageFromEvent(event, main);
-    if (image && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-      const src = image.currentSrc || image.src;
-      if (src) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        openImageViewer(src, image.alt || '', imageViewerItems(image, main));
-        return;
-      }
+    const main = event.target.closest?.(`#${IDS.root}`) || document.getElementById('main-content');
+    const viewer = main && imageViewerTarget(event, main);
+    if (viewer && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openImageViewer(viewer.src, viewer.alt, viewer.gallery);
+      return;
     }
 
     const anchor = event.target.closest('a[href]');
