@@ -214,10 +214,8 @@ html.rip-layout-active { overflow-x: clip !important; }
   position: relative;
   z-index: 1;
   display: block;
-  width: auto;
-  height: auto;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 72px);
+  width: calc(100vw - 48px);
+  height: calc(100vh - 72px);
   object-fit: contain;
   cursor: zoom-in;
   touch-action: none;

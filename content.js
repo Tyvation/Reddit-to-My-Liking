@@ -129,8 +129,9 @@
   }
 
   function mediaType(url = '') {
-    if (/\.(mp4|webm|mov)(?:\?|$)/i.test(url)) return 'video';
-    if (/\.(png|jpe?g|gif|webp)(?:\?|$)/i.test(url)) return 'image';
+    if (/[?&]format=(?:mp4|webm)(?:&|$)/i.test(url)
+      || /\.(mp4|webm|mov|m4v|ogv)(?:[?#]|$)/i.test(url)) return 'video';
+    if (/\.(png|jpe?g|gif|webp|avif|apng|bmp|svg|ico)(?:[?#]|$)/i.test(url)) return 'image';
     return '';
   }
 
@@ -567,7 +568,7 @@
   }
 
   function zoomAroundPoint(scale, x, y, pointX, pointY, factor) {
-    const nextScale = Math.min(8, Math.max(1, scale * factor));
+    const nextScale = Math.min(8, Math.max(.5, scale * factor));
     if (nextScale === 1) return { scale: 1, x: 0, y: 0 };
     const ratio = nextScale / scale;
     return {
@@ -577,32 +578,42 @@
     };
   }
 
-  function openImageViewer(src, alt = '', gallery = []) {
+  function openImageViewer(src, alt = '', gallery = [], type = 'image', poster = '') {
     const root = document.body;
     if (!root || !/^(https?:|blob:|data:image\/)/i.test(src)) return;
     document.querySelector('.rip-lightbox')?.remove();
 
-    const items = gallery.length ? gallery : [{ src, alt }];
+    const items = gallery.length ? gallery : [{ src, alt, poster }];
     let currentIndex = Math.max(0, items.findIndex(item => item.src === src));
+    const isVideo = type === 'video';
 
     const lightbox = document.createElement('div');
     lightbox.className = 'rip-lightbox';
     lightbox.setAttribute('role', 'dialog');
     lightbox.setAttribute('aria-modal', 'true');
-    lightbox.setAttribute('aria-label', 'Image viewer');
-    const image = document.createElement('img');
+    lightbox.setAttribute('aria-label', 'Media viewer');
+    const image = document.createElement(isVideo ? 'video' : 'img');
     image.className = 'rip-lightbox-image';
     image.src = src;
-    image.alt = alt || 'Reddit image';
-    image.decoding = 'async';
     image.draggable = false;
+    if (isVideo) {
+      image.autoplay = true;
+      image.loop = true;
+      image.muted = true;
+      image.playsInline = true;
+      image.poster = poster;
+      image.setAttribute('aria-label', alt || 'Reddit GIF');
+    } else {
+      image.alt = alt || 'Reddit image';
+      image.decoding = 'async';
+    }
     const backdrop = document.createElement('div');
     backdrop.className = 'rip-lightbox-backdrop';
-    backdrop.style.backgroundImage = `url(${JSON.stringify(src)})`;
+    backdrop.style.backgroundImage = `url(${JSON.stringify(poster || src)})`;
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'rip-lightbox-close';
-    close.setAttribute('aria-label', 'Close image');
+    close.setAttribute('aria-label', 'Close media');
     close.textContent = '×';
     const previous = document.createElement('button');
     previous.type = 'button';
@@ -636,7 +647,7 @@
       renderFrame = requestAnimationFrame(() => {
         renderFrame = 0;
         image.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
-        const nextZoomed = scale > 1;
+        const nextZoomed = scale !== 1;
         if (nextZoomed !== zoomed) {
           zoomed = nextZoomed;
           image.classList.toggle('is-zoomed', zoomed);
@@ -654,8 +665,9 @@
       currentIndex = Math.max(0, Math.min(items.length - 1, index));
       const item = items[currentIndex];
       image.src = item.src;
-      image.alt = item.alt || 'Reddit image';
-      backdrop.style.backgroundImage = `url(${JSON.stringify(item.src)})`;
+      if (isVideo) image.play().catch(() => {});
+      else image.alt = item.alt || 'Reddit image';
+      backdrop.style.backgroundImage = `url(${JSON.stringify(item.poster || item.src)})`;
       scale = 1;
       x = 0;
       y = 0;
@@ -707,6 +719,7 @@
     const dismiss = () => {
       cancelAnimationFrame(renderFrame);
       document.removeEventListener('keydown', onKeyDown);
+      image.pause?.();
       lightbox.remove();
     };
     const onKeyDown = event => {
@@ -770,11 +783,30 @@
     const gifPlayer = path.find(node => node?.matches?.('shreddit-player[gif]'));
     if (gifPlayer) {
       const video = gifPlayer.shadowRoot?.querySelector('video');
-      if (!video || video.paused || !path.includes(video)) return null;
-      const gifSrc = gifPlayer.getAttribute('src')
-        ?.match(/^https:\/\/(?:preview|i)\.redd\.it\/[^?]+\.gif/i)?.[0]
-        ?.replace('preview.redd.it', 'i.redd.it');
-      return gifSrc ? { src: gifSrc, alt: 'Reddit GIF', gallery: [] } : null;
+      if (!video || path.some(node => node?.matches?.('shreddit-media-ui'))) return null;
+      const playerSrc = gifPlayer.getAttribute('src') || '';
+      const playerType = mediaType(playerSrc);
+      if (playerType) return {
+        src: playerSrc,
+        alt: 'Reddit GIF',
+        gallery: [],
+        type: playerType,
+        poster: gifPlayer.getAttribute('poster') || ''
+      };
+
+      let videoSrc = gifPlayer.getAttribute('preview') || '';
+      try {
+        const sources = JSON.parse(gifPlayer.getAttribute('packaged-media-json') || '{}')
+          .playbackMp4s?.permutations;
+        videoSrc = sources?.at(-1)?.source?.url || videoSrc;
+      } catch {}
+      return videoSrc ? {
+        src: videoSrc,
+        alt: 'Reddit GIF',
+        gallery: [],
+        type: 'video',
+        poster: gifPlayer.getAttribute('poster') || ''
+      } : null;
     }
 
     const image = imageFromEvent(event, main);
@@ -784,9 +816,14 @@
     }
 
     const link = path.find(node => node?.tagName === 'A'
-      && /^https?:/i.test(node.href) && mediaType(node.href) === 'image');
+      && /^https?:/i.test(node.href) && mediaType(node.href));
     return link
-      ? { src: link.href, alt: link.textContent.trim() || 'Reddit image', gallery: [] }
+      ? {
+        src: link.href,
+        alt: link.textContent.trim() || 'Reddit media',
+        gallery: [],
+        type: mediaType(link.href)
+      }
       : null;
   }
 
@@ -800,7 +837,7 @@
       if (!viewer) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      openImageViewer(viewer.src, viewer.alt, viewer.gallery);
+      openImageViewer(viewer.src, viewer.alt, viewer.gallery, viewer.type, viewer.poster);
     }, true);
   }
 
@@ -1069,7 +1106,7 @@
     if (viewer && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      openImageViewer(viewer.src, viewer.alt, viewer.gallery);
+      openImageViewer(viewer.src, viewer.alt, viewer.gallery, viewer.type, viewer.poster);
       return;
     }
 
